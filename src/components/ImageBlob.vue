@@ -7,13 +7,13 @@
 
     <div v-if="step === 2">
       <div v-for="image in images" :key="image.id">
-        <img :src="image.blob" alt="Saved Image" />
+        <img :src="image.blob" alt="Saved Image" @click="setSelectedData(image.id)" />
       </div>
     </div>
 
     <div v-if="step === 3">
       <p>Data updated:</p>
-      <img id="updateImage" :src="updatedImage" alt="Image" />
+      <img id="updateImage" :src="newImage" alt="Image" />
     </div>
 
     <div v-if="step === 4">
@@ -21,10 +21,10 @@
     </div>
 
     <br />
-    <button @click="fetchImageURL">Add Data</button>
+    <button @click="addData">Add Data</button>
     <button @click="readData">Read Data</button>
-    <button @click="fetchImage">Update Data</button>
-    <button @click="fetchImage">Delete Data</button>
+    <button v-if="selectedImage" @click="updateData">Update Data</button>
+    <button v-if="selectedImage" @click="deleteData">Delete Data</button>
   </div>
 </template>
 
@@ -45,10 +45,17 @@ let step = ref(0);
 const newImage = ref(null);
 const imageURL = ref(null);
 const images = ref([]);
+const selectedImage = ref(null);
 
 const reader = new FileReader();
 
+const setSelectedData = (imageId) => {
+  selectedImage.value = imageId;
+}
+
 const fetchImageURL = async () => {
+  selectedImage.value = null;
+  
   try {
     await fetch("https://random.imagecdn.app/v1/image?width=500&height=500").then((response) => {
       if (response.ok) {
@@ -78,14 +85,16 @@ const fetchImage = async () => {
       newImage.value = response;
       reader.readAsDataURL(newImage.value);
 
-      addData();
+      return;
     });
   } catch (error) {
     console.error("An error occured: " + error);
   }
 }
 
-const addData = () => {
+const addData = async () => {
+  await fetchImageURL();
+
   const request = indexedDB.open(dbName, 2);
 
   request.onerror = (event) => {
@@ -129,6 +138,7 @@ const addData = () => {
 
 const readData = () => {
   images.value = [];
+  selectedImage.value = null;
 
   const request = indexedDB.open(dbName, 2);
 
@@ -159,6 +169,83 @@ const readData = () => {
 
     imageCursor.onerror = (event) => {
       console.error("Error reading data: ", event.target.error);
+      db.close();
+    };
+  };
+}
+
+const updateData = () => {
+  const request = indexedDB.open(dbName, 2);
+
+  request.onerror = (event) => {
+    console.error("Error opening database:", event.target.error);
+  };
+
+  request.onsuccess = (event) => {
+    const db = event.target.result;
+
+    const updateTransaction = db.transaction("images", "readwrite");
+    const imageObjectStore = updateTransaction.objectStore("images");
+
+    const imageCursor = imageObjectStore.openCursor();
+
+    imageCursor.onsuccess = (event) => {
+      const cursor = event.target.result;
+
+      if (cursor.value.id === selectedImage.value) {
+        const imageToUpdate = { id: selectedImage, blob: newImage.value }
+        const updateRequest = imageObjectStore.put(imageToUpdate);
+    
+        updateRequest.onsuccess = (event) => {
+          console.log("Data updated successfully");
+        };
+    
+        updateRequest.onerror = (event) => {
+          console.error("Error updating data: ", event.target.error);
+        };
+    
+        updateTransaction.oncomplete = () => {
+          console.log("Update transaction completed");
+          db.close();
+        };
+      } else {
+        if (cursor) {
+          cursor.continue();
+        } else {
+          console.log("Data not found");
+          db.close();
+        }
+      }
+    }
+
+  };
+}
+
+const deleteData = () => {
+  const request = indexedDB.open(dbName, 2);
+
+  request.onerror = (event) => {
+    console.error("Error opening database:", event.target.error);
+  };
+
+  request.onsuccess = (event) => {
+    const db = event.target.result;
+
+    const deleteTransaction = db.transaction("images", "readwrite");
+    const deleteObjectStore = deleteTransaction.objectStore("images");
+
+    const deleteRequest = deleteObjectStore.delete(selectedImage.value);
+
+    deleteRequest.onsuccess = (event) => {
+      console.log("Data deleted successfully");
+    };
+
+    deleteRequest.onerror = (event) => {
+      console.error("Error deleting data: ", event.target.error);
+    };
+
+    deleteTransaction.oncomplete = () => {
+      console.log("Delete transaction completed");
       db.close();
     };
   };
